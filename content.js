@@ -130,20 +130,25 @@ function scrapeProfile() {
 function scrapeCompany() {
   const sections = scrapeNamedSections(["About us", "Overview", "Locations", "Employees at", "Updates", "Jobs"]);
   const facts = scrapeCompanyFacts();
+  const overview = sections["About us"] || sections.Overview || companyOverviewFromLines();
 
   return cleanObject({
-    name: firstText(["main h1", "h1", ".org-top-card-summary__title"]),
-    tagline: firstText([".org-top-card-summary__tagline", "main h1 + p", "main h1 + div"]),
-    overview: sections["About us"] || sections.Overview,
-    website: facts.website || findFirstHref(/https?:\/\/(?!www\.linkedin\.com)/i),
+    name: firstText(["main h1", "h1", ".org-top-card-summary__title"]) || companyNameFromDocumentTitle() || companyNameFromUrl(),
+    tagline: firstText([".org-top-card-summary__tagline", "main h1 + p", "main h1 + div"]) || companyTaglineFromLines(),
+    overview,
+    website: facts.website || findCompanyWebsite(),
     industry: facts.industry,
     companySize: facts.companySize,
     headquarters: facts.headquarters,
     founded: facts.founded,
+    type: facts.type,
     specialties: facts.specialties,
-    locations: parseListSection(sections.Locations),
+    followers: facts.followers || findTextMatching(/followers/i),
+    employeesOnLinkedIn: facts.employeesOnLinkedIn,
+    companyUrl: document.querySelector("link[rel='canonical']")?.href || location.href,
+    locations: parseListSection(sections.Locations || companySectionAfterLabel("Locations")),
     jobs: parseListSection(sections.Jobs),
-    logo: meta("og:image")
+    logo: getCompanyLogo()
   });
 }
 
@@ -881,12 +886,84 @@ function scrapeCompanyFacts() {
 
   facts.website = valueAfterLabel(textValue, "Website");
   facts.industry = valueAfterLabel(textValue, "Industry");
-  facts.companySize = valueAfterLabel(textValue, "Company size");
+  facts.companySize = valueAfterLabel(textValue, "Company size") || findLine(compactLines(textValue), /\bemployees\b/i);
   facts.headquarters = valueAfterLabel(textValue, "Headquarters");
   facts.founded = valueAfterLabel(textValue, "Founded");
+  facts.type = valueAfterLabel(textValue, "Type");
   facts.specialties = valueAfterLabel(textValue, "Specialties");
+  facts.followers = findLine(compactLines(textValue), /followers/i);
+  facts.employeesOnLinkedIn = valueAfterLabel(textValue, "Employees at") || findLine(compactLines(textValue), /on linkedin/i);
 
   return cleanObject(facts);
+}
+
+function companyNameFromDocumentTitle() {
+  return compactText(document.title.replace(/:\s*(about|overview|jobs|people).*$/i, "").replace(/\s*\|\s*LinkedIn.*$/i, ""));
+}
+
+function companyNameFromUrl() {
+  const match = location.pathname.match(/^\/(?:company|school)\/([^/]+)/);
+  if (!match) return "";
+  return match[1]
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function companyTaglineFromLines() {
+  const name = companyNameFromDocumentTitle();
+  const lines = compactLines(document.body?.innerText || "");
+  const index = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(name));
+
+  if (index >= 0) {
+    return lines.slice(index + 1).find((line) => !isCompanyChromeLine(line) && !/followers|employees/i.test(line)) || "";
+  }
+
+  return "";
+}
+
+function companyOverviewFromLines() {
+  return companySectionAfterLabel("Overview") || companySectionAfterLabel("About us") || companySectionAfterLabel("About");
+}
+
+function companySectionAfterLabel(label) {
+  const lines = compactLines(document.body?.innerText || "");
+  const start = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(label));
+  if (start < 0) return "";
+
+  const stopLabels = new Set(["website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "employees at", "updates", "jobs"]);
+  const values = [];
+
+  for (const line of lines.slice(start + 1)) {
+    if (stopLabels.has(normalizeLabel(line))) break;
+    if (!isCompanyChromeLine(line)) values.push(line);
+  }
+
+  return values.join("\n");
+}
+
+function isCompanyChromeLine(line) {
+  return /^(home|about|posts|jobs|people|show more|show less|follow|following|visit website)$/i.test(line)
+    || /^page ·/i.test(line);
+}
+
+function findCompanyWebsite() {
+  const direct = findFirstHref(/https?:\/\/(?!www\.linkedin\.com)/i);
+  if (direct) return direct;
+
+  const linkedInRedirect = getUsefulAnchors().find((item) => /linkedin\.com\/redir\/redirect/i.test(item.href));
+  if (!linkedInRedirect) return "";
+
+  try {
+    return new URL(linkedInRedirect.href).searchParams.get("url") || linkedInRedirect.href;
+  } catch {
+    return linkedInRedirect.href;
+  }
+}
+
+function getCompanyLogo() {
+  return meta("og:image") || imageUrlFromNode(document.querySelector(".org-top-card-primary-content__logo, .org-top-card-summary__logo img, img[alt*='logo'], main img"));
 }
 
 function scrapeJobCriteria(root = document.body) {

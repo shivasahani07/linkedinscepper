@@ -16,9 +16,12 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   width: 420px;
+  max-width: 420px;
   margin: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 0 0, #dceeff 0, transparent 180px),
     var(--bg);
@@ -27,14 +30,20 @@ body {
 }
 
 button {
+  display: inline-flex;
+  min-width: 0;
   min-height: 36px;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--line);
   border-radius: 10px;
+  padding: 0 10px;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
   font: inherit;
   font-weight: 650;
+  text-align: center;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
@@ -51,6 +60,8 @@ button:disabled {
 
 .shell {
   display: grid;
+  width: 100%;
+  min-width: 0;
   gap: 14px;
   padding: 16px;
 }
@@ -98,7 +109,8 @@ h2 {
 
 .controls {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -137,6 +149,7 @@ h2 {
 
 .summary {
   display: grid;
+  min-width: 0;
   gap: 10px;
 }
 
@@ -194,6 +207,16 @@ h2 {
   margin-top: 4px;
 }
 
+.profile-name,
+.profile-headline,
+.profile-location,
+.summary-meta,
+.summary-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .profile-location {
   margin-top: 6px;
   font-size: 12px;
@@ -228,6 +251,8 @@ h2 {
 }
 
 .summary-card {
+  min-width: 0;
+  overflow: hidden;
   padding: 11px;
 }
 
@@ -291,6 +316,7 @@ h2 {
 }
 
 .preview {
+  min-width: 0;
   overflow: hidden;
 }
 
