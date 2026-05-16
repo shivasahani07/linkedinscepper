@@ -59,6 +59,7 @@ function detectPageType(url) {
 function scrapeProfile() {
   const sections = scrapeNamedSections(["About", "Experience", "Education", "Licenses & certifications", "Skills", "Projects", "Volunteer experience"]);
   const anchors = getUsefulAnchors();
+  const profilePicture = getProfilePicture();
 
   return cleanObject({
     name: firstText(["main h1", "h1"]),
@@ -68,15 +69,17 @@ function scrapeProfile() {
       "[data-generated-suggestion-target] ~ div"
     ]),
     location: findNearbyText(["Location", "Contact info"]) || textFromProfileTopCard(2),
+    profileUrl: document.querySelector("link[rel='canonical']")?.href || location.href,
     about: sections.About,
-    experience: parseListSection(sections.Experience),
-    education: parseListSection(sections.Education),
-    licensesAndCertifications: parseListSection(sections["Licenses & certifications"]),
-    skills: parseListSection(sections.Skills),
-    projects: parseListSection(sections.Projects),
-    volunteerExperience: parseListSection(sections["Volunteer experience"]),
+    experience: scrapeExperienceSection(),
+    education: scrapeEducationSection(),
+    licensesAndCertifications: scrapeGenericProfileSection("Licenses & certifications"),
+    skills: scrapeSkillsSection(),
+    projects: scrapeGenericProfileSection("Projects"),
+    volunteerExperience: scrapeGenericProfileSection("Volunteer experience"),
     contactLinks: anchors.filter((item) => /mailto:|tel:|contact-info|twitter|github|portfolio|website/i.test(item.href)),
-    profileImage: meta("og:image")
+    profilePicture,
+    profileImage: profilePicture.url || meta("og:image")
   });
 }
 
@@ -414,13 +417,9 @@ function cleanRepeatedText(value) {
 
 function scrapeNamedSections(names, root = document) {
   const result = {};
-  const sections = [...root.querySelectorAll("section, article, div[id*='description'], div[class*='description']")];
 
   for (const name of names) {
-    const section = sections.find((candidate) => {
-      const heading = firstTextWithin(candidate, ["h2", "h3", "[aria-hidden='true']"]);
-      return normalizeLabel(heading) === normalizeLabel(name) || compactText(candidate.innerText).startsWith(name);
-    });
+    const section = findNamedSection(name, root);
 
     if (section) {
       result[name] = trimSectionText(section.innerText, name);
@@ -428,6 +427,225 @@ function scrapeNamedSections(names, root = document) {
   }
 
   return result;
+}
+
+function findNamedSection(name, root = document) {
+  const sections = [...root.querySelectorAll("section, article, div[id*='description'], div[class*='description']")];
+
+  return sections.find((candidate) => {
+    const heading = firstTextWithin(candidate, ["h2", "h3", "[aria-hidden='true']"]);
+    return normalizeLabel(heading) === normalizeLabel(name) || compactText(candidate.innerText).startsWith(name);
+  }) || null;
+}
+
+function scrapeExperienceSection() {
+  return scrapeProfileSection("Experience").map(parseExperienceItem).filter((item) => item.title || item.company || item.raw);
+}
+
+function scrapeEducationSection() {
+  return scrapeProfileSection("Education").map(parseEducationItem).filter((item) => item.school || item.degree || item.raw);
+}
+
+function scrapeSkillsSection() {
+  const section = findNamedSection("Skills");
+  if (!section) return [];
+
+  const itemNodes = getProfileSectionItemNodes(section);
+  const rawItems = itemNodes.length
+    ? itemNodes.map((node) => cleanProfileItemText(node.innerText, "Skills"))
+    : compactLines(trimSectionText(section.innerText, "Skills"))
+      .filter((line) => !isProfileSectionChrome(line))
+      .map((line) => line.replace(/\s+Skill name\s*$/i, ""));
+
+  return rawItems
+    .map(parseSkillItem)
+    .filter((item) => item.name)
+    .slice(0, 50);
+}
+
+function scrapeGenericProfileSection(name) {
+  return scrapeProfileSection(name).map((raw) => cleanObject({ title: compactLines(raw)[0] || "", details: compactLines(raw).slice(1).join("\n"), raw }));
+}
+
+function scrapeProfileSection(name) {
+  const section = findNamedSection(name);
+  if (!section) return [];
+
+  const itemNodes = getProfileSectionItemNodes(section);
+  const items = itemNodes.length
+    ? itemNodes.map((node) => cleanProfileItemText(node.innerText, name))
+    : parseListSection(trimSectionText(section.innerText, name));
+
+  return items.filter(Boolean).slice(0, 50);
+}
+
+function getProfileSectionItemNodes(section) {
+  const selectors = [
+    "li.pvs-list__paged-list-item",
+    "li.artdeco-list__item",
+    ".pvs-list__item--line-separated",
+    ".pvs-entity"
+  ].join(", ");
+  const nodes = [...section.querySelectorAll(selectors)]
+    .filter((node) => !node.querySelector("section, article"))
+    .filter((node) => compactText(node.innerText || "").length > 2);
+  const unique = [];
+
+  for (const node of nodes) {
+    if (unique.some((existing) => existing.contains(node) || node.contains(existing))) {
+      continue;
+    }
+
+    unique.push(node);
+  }
+
+  return unique;
+}
+
+function cleanProfileItemText(value, heading = "") {
+  const lines = dedupeLines(compactLines(value))
+    .filter((line) => normalizeLabel(line) !== normalizeLabel(heading))
+    .filter((line) => !isProfileSectionChrome(line));
+
+  return lines.join("\n");
+}
+
+function isProfileSectionChrome(line) {
+  return /^(show all|see all|show more|show less|view all|activate to view larger image|company logo|school logo|profile picture)$/i.test(line)
+    || /^show all \d+/i.test(line)
+    || /^(image|logo)$/i.test(line);
+}
+
+function parseExperienceItem(raw) {
+  const lines = cleanProfileLines(raw);
+  const [title = "", companyLine = ""] = lines;
+  const dateLine = findProfileDateLine(lines);
+  const locationLine = findProfileLocationLine(lines, [title, companyLine, dateLine]);
+  const companyParts = splitBulletText(companyLine);
+  const dateParts = splitBulletText(dateLine);
+  const excluded = new Set([title, companyLine, dateLine, locationLine].filter(Boolean));
+  const description = lines.filter((line) => !excluded.has(line)).join("\n");
+
+  return cleanObject({
+    title,
+    company: companyParts[0] || companyLine,
+    employmentType: companyParts.slice(1).join(" · "),
+    dateRange: dateParts[0] || dateLine,
+    duration: dateParts.slice(1).join(" · "),
+    location: locationLine,
+    description,
+    raw
+  });
+}
+
+function parseEducationItem(raw) {
+  const lines = cleanProfileLines(raw);
+  const [school = "", degreeLine = ""] = lines;
+  const dateLine = findProfileDateLine(lines);
+  const degreeParts = degreeLine ? degreeLine.split(",").map((item) => compactText(item)).filter(Boolean) : [];
+  const excluded = new Set([school, degreeLine, dateLine].filter(Boolean));
+  const description = lines.filter((line) => !excluded.has(line)).join("\n");
+
+  return cleanObject({
+    school,
+    degree: degreeParts[0] || degreeLine,
+    fieldOfStudy: degreeParts.slice(1).join(", "),
+    dateRange: splitBulletText(dateLine)[0] || dateLine,
+    description,
+    raw
+  });
+}
+
+function parseSkillItem(raw) {
+  const lines = cleanProfileLines(raw)
+    .filter((line) => !/^skill name$/i.test(line));
+  const [name = ""] = lines;
+  const endorsements = lines.find((line) => /endorsements?/i.test(line)) || "";
+  const associatedWith = lines.find((line) => /associated with|used at|featured/i.test(line)) || "";
+  const excluded = new Set([name, endorsements, associatedWith].filter(Boolean));
+  const details = lines.filter((line) => !excluded.has(line)).join("\n");
+
+  return cleanObject({
+    name,
+    endorsements,
+    associatedWith,
+    details,
+    raw
+  });
+}
+
+function cleanProfileLines(raw) {
+  return dedupeLines(compactLines(raw))
+    .filter((line) => !isProfileSectionChrome(line));
+}
+
+function findProfileDateLine(lines) {
+  return lines.find((line) => /\b(present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|\d{4})\b/i.test(line)
+    && /-|–|—|·|\u00b7|\b\d+\s*(yr|yrs|year|years|mo|mos|month|months)\b/i.test(line)) || "";
+}
+
+function findProfileLocationLine(lines, excludedLines = []) {
+  const excluded = new Set(excludedLines.filter(Boolean));
+
+  return lines.find((line) => {
+    if (excluded.has(line)) return false;
+    if (findProfileDateLine([line])) return false;
+    if (/remote|hybrid|on-site|onsite/i.test(line)) return true;
+    return /,\s*[A-Za-z][A-Za-z .'-]+/.test(line) && !/degree|university|college|school|license|certification/i.test(line);
+  }) || "";
+}
+
+function splitBulletText(value) {
+  return compactText(value)
+    .split(/·|\u00b7|•/)
+    .map((item) => compactText(item))
+    .filter(Boolean);
+}
+
+function getProfilePicture() {
+  const topCard = document.querySelector(".pv-top-card, .ph5, main section") || document.querySelector("main");
+  const selectors = [
+    "img.pv-top-card-profile-picture__image--show",
+    "img.pv-top-card-profile-picture__image",
+    ".pv-top-card__photo img",
+    ".profile-photo-edit__preview",
+    "button img[alt*='profile']",
+    "img[alt*='profile']",
+    "img[width='200']",
+    "img[height='200']",
+    "img"
+  ];
+  const candidates = selectors.flatMap((selector) => [...(topCard || document).querySelectorAll(selector)]);
+  const node = candidates.find((image) => {
+    const url = imageUrlFromNode(image);
+    const alt = compactText(image.alt || "");
+    if (!url || /^data:image\/gif/i.test(url)) return false;
+    if (/background|cover|company|logo/i.test(alt)) return false;
+    return true;
+  });
+  const url = imageUrlFromNode(node) || meta("og:image");
+
+  return cleanObject({
+    url,
+    alt: compactText(node?.alt || ""),
+    width: node?.naturalWidth || node?.width || "",
+    height: node?.naturalHeight || node?.height || ""
+  });
+}
+
+function imageUrlFromNode(node) {
+  if (!node) return "";
+
+  const srcset = node.getAttribute("srcset") || "";
+  const srcsetUrl = srcset.split(",").map((entry) => compactText(entry).split(" ")[0]).filter(Boolean).at(-1) || "";
+
+  return node.currentSrc
+    || node.src
+    || node.getAttribute("data-delayed-url")
+    || node.getAttribute("data-src")
+    || node.getAttribute("data-ghost-url")
+    || srcsetUrl
+    || "";
 }
 
 function scrapeCompanyFacts() {

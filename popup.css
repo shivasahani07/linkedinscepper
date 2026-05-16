@@ -1,13 +1,15 @@
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: #eef3f8;
   --panel: #ffffff;
   --text: #14171a;
   --muted: #68707a;
   --line: #d9dee5;
   --accent: #0a66c2;
   --accent-strong: #004182;
+  --accent-soft: #e7f3ff;
   --danger: #b42318;
+  --shadow: 0 14px 36px rgba(15, 23, 42, 0.12);
 }
 
 * {
@@ -15,9 +17,11 @@
 }
 
 body {
-  width: 380px;
+  width: 420px;
   margin: 0;
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 0 0, #dceeff 0, transparent 180px),
+    var(--bg);
   color: var(--text);
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -25,16 +29,19 @@ body {
 button {
   min-height: 36px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
   font: inherit;
   font-weight: 650;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 button:hover {
   border-color: #aeb7c2;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
 }
 
 button:disabled {
@@ -44,8 +51,8 @@ button:disabled {
 
 .shell {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 16px;
 }
 
 .header {
@@ -84,7 +91,7 @@ h2 {
   height: 30px;
   place-items: center;
   border-radius: 999px;
-  background: #e7f3ff;
+  background: var(--accent-soft);
   color: var(--accent-strong);
   font-weight: 800;
 }
@@ -100,6 +107,7 @@ h2 {
   border-color: var(--accent);
   background: var(--accent);
   color: #fff;
+  box-shadow: 0 10px 22px rgba(10, 102, 194, 0.22);
 }
 
 .controls .primary:hover {
@@ -111,15 +119,175 @@ h2 {
 }
 
 .status-panel,
-.preview {
+.preview,
+.summary-card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--panel);
 }
 
 .status-panel {
   padding: 10px;
   color: var(--muted);
+}
+
+.summary[hidden] {
+  display: none;
+}
+
+.summary {
+  display: grid;
+  gap: 10px;
+}
+
+.profile-hero {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(10, 102, 194, 0.18);
+  border-radius: 16px;
+  padding: 12px;
+  background: linear-gradient(135deg, #fff 0%, #f3f8ff 100%);
+  box-shadow: var(--shadow);
+}
+
+.avatar {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  overflow: hidden;
+  border: 3px solid #fff;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-hero-text {
+  min-width: 0;
+}
+
+.profile-name {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.profile-headline,
+.profile-location,
+.summary-meta,
+.summary-text {
+  color: var(--muted);
+}
+
+.profile-headline {
+  margin-top: 4px;
+}
+
+.profile-location {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.82);
+  text-align: center;
+}
+
+.stat strong {
+  color: var(--accent-strong);
+  font-size: 17px;
+}
+
+.stat span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.summary-card {
+  padding: 11px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.section-heading span {
+  min-width: 24px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.summary-list {
+  display: grid;
+  gap: 9px;
+}
+
+.summary-item {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid #edf0f4;
+  padding-top: 9px;
+}
+
+.summary-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.summary-meta {
+  font-size: 12px;
+}
+
+.summary-text {
+  font-size: 12px;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .preview {
