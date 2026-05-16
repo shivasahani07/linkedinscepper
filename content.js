@@ -896,14 +896,14 @@ function scrapeCompanyFacts() {
   facts.founded = companyDomValueAfterLabel("Founded") || companyValueAfterLabel(lines, "Founded");
   facts.type = companyDomValueAfterLabel("Type") || companyValueAfterLabel(lines, "Type");
   facts.specialties = companyDomValueAfterLabel("Specialties") || companyValueAfterLabel(lines, "Specialties");
-  facts.followers = summaryFacts.followers || findLine(lines, /followers/i);
-  facts.employeesOnLinkedIn = findLine(lines, /employees on linkedin|associated members/i);
+  facts.followers = summaryFacts.followers || findCompanyFactLine(lines, /followers/i);
+  facts.employeesOnLinkedIn = findCompanyFactLine(lines, /employees on linkedin|associated members/i);
 
   return cleanObject(facts);
 }
 
 function companyHeaderSummaryFacts(lines) {
-  const summaryLine = lines.find((line) => /followers/i.test(line) && /employees/i.test(line) && /·|•|\|/.test(line)) || "";
+  const summaryLine = lines.find((line) => isReasonableCompanyFactLine(line) && /followers/i.test(line) && /employees/i.test(line) && /·|•|\|/.test(line)) || "";
   const parts = splitCompanySummary(summaryLine);
 
   return cleanObject({
@@ -916,18 +916,54 @@ function companyHeaderSummaryFacts(lines) {
 
 
 function companyTextLines() {
-  const body = document.body;
-  const lines = [
-    ...compactLines(body?.innerText || ""),
-    ...compactLines(body?.textContent || "")
-  ];
+  const bodyLines = compactLines(document.body?.innerText || "")
+    .filter(isReasonableCompanyTextLine);
+  const scopedLines = companyScopedTextLines();
+  const combined = dedupeLines([...bodyLines, ...scopedLines]);
 
-  if (lines.length) {
-    return dedupeLines(lines);
-  }
+  if (combined.length) return combined;
 
   return dedupeLines([...document.querySelectorAll("main h1, main h2, main h3, main dt, main dd, main span, main p, main a")]
-    .flatMap((node) => compactLines(node.innerText || node.textContent || "")));
+    .flatMap((node) => companyLinesFromNode(node)));
+}
+
+function companyScopedTextLines() {
+  return dedupeLines([...document.querySelectorAll([
+    "main section",
+    "main article",
+    "main dl",
+    "main .artdeco-card",
+    "main .org-page-details-module__card-spacing",
+    "main [class*='org-page-details']",
+    "main [class*='organization']"
+  ].join(", "))]
+    .flatMap((node) => companyLinesFromNode(node)));
+}
+
+function companyLinesFromNode(node) {
+  if (!node) return [];
+
+  const innerLines = compactLines(node.innerText || "");
+  if (innerLines.length > 1) return innerLines.filter(isReasonableCompanyTextLine);
+
+  const textValue = node.textContent || "";
+  if (!textValue || textValue.length > 20000 || /window\.__como_module_cache__/i.test(textValue)) return [];
+
+  return compactLines(textValue).filter(isReasonableCompanyTextLine);
+}
+
+function isReasonableCompanyTextLine(line) {
+  const value = compactText(line);
+  return Boolean(value) && value.length <= 1200 && !/window\.__como_module_cache__|Video Player is loading|Beginning of dialog window|Ad Options|Why am I seeing this ad/i.test(value);
+}
+
+function findCompanyFactLine(lines, pattern) {
+  return lines.find((line) => pattern.test(line) && isReasonableCompanyFactLine(line)) || "";
+}
+
+function isReasonableCompanyFactLine(line) {
+  const value = compactText(line);
+  return isReasonableCompanyTextLine(value) && value.length <= 240 && !/Activity|Posts|Comments|Images|Profile language|Public profile|People you may know|Who your viewers also viewed/i.test(value);
 }
 
 function companyOverviewFromDom() {
@@ -936,7 +972,7 @@ function companyOverviewFromDom() {
   if (!heading) return "";
 
   for (let scope = heading.parentElement; scope && scope !== document.body; scope = scope.parentElement) {
-    const lines = compactLines(scope.innerText || scope.textContent || "");
+    const lines = companyLinesFromNode(scope);
     if (lines.length < 2) continue;
 
     const overview = trimCompanySectionLines(lines, "Overview");
@@ -982,7 +1018,7 @@ function companyDomValueAfterLabel(label) {
     const link = label === "Website" ? [...scope.querySelectorAll("a[href]")].map((anchor) => anchor.href).find(isLikelyCompanyWebsite) : "";
     if (link) return link;
 
-    const lines = compactLines(scope.innerText || scope.textContent || "");
+    const lines = companyLinesFromNode(scope);
     const value = companyValueAfterLabel(lines, label);
     if (value && value !== label) return value;
   }
