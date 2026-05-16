@@ -892,7 +892,7 @@ function scrapeCompanyFacts() {
   facts.type = valueAfterLabel(textValue, "Type");
   facts.specialties = valueAfterLabel(textValue, "Specialties");
   facts.followers = findLine(compactLines(textValue), /followers/i);
-  facts.employeesOnLinkedIn = valueAfterLabel(textValue, "Employees at") || findLine(compactLines(textValue), /on linkedin/i);
+  facts.employeesOnLinkedIn = findLine(compactLines(textValue), /employees on linkedin|associated members/i);
 
   return cleanObject(facts);
 }
@@ -932,11 +932,12 @@ function companySectionAfterLabel(label) {
   const start = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(label));
   if (start < 0) return "";
 
-  const stopLabels = new Set(["website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "employees at", "updates", "jobs"]);
+  const stopLabels = new Set(["website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "updates", "jobs"]);
   const values = [];
 
   for (const line of lines.slice(start + 1)) {
-    if (stopLabels.has(normalizeLabel(line))) break;
+    const normalized = normalizeLabel(line);
+    if (stopLabels.has(normalized) || /^employees at\b/i.test(line)) break;
     if (!isCompanyChromeLine(line)) values.push(line);
   }
 
