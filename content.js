@@ -3,14 +3,58 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  try {
-    sendResponse({ ok: true, data: scrapeLinkedInPage() });
-  } catch (error) {
-    sendResponse({ ok: false, error: error.message });
-  }
+  scrapeLinkedInPageWithExpansion()
+    .then((data) => sendResponse({ ok: true, data }))
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
 
   return true;
 });
+
+async function scrapeLinkedInPageWithExpansion() {
+  await expandVisibleProfileContent();
+  return scrapeLinkedInPage();
+}
+
+async function expandVisibleProfileContent() {
+  for (let pass = 0; pass < 2; pass += 1) {
+    const clicked = clickVisibleShowMoreButtons();
+    if (!clicked) return;
+    await delay(250);
+  }
+}
+
+function clickVisibleShowMoreButtons() {
+  const buttons = [...document.querySelectorAll("button, [role='button']")];
+  let clicked = 0;
+
+  for (const button of buttons) {
+    if (!isVisibleElement(button) || button.disabled || button.getAttribute("aria-disabled") === "true") {
+      continue;
+    }
+
+    const label = compactText(button.innerText || button.textContent || button.getAttribute("aria-label") || "")
+      .replace(/^…\s*/, "")
+      .replace(/^\.\.\.\s*/, "");
+    if (!/^(see more|show more|more)\b/i.test(label)) {
+      continue;
+    }
+
+    button.click();
+    clicked += 1;
+  }
+
+  return clicked;
+}
+
+function isVisibleElement(node) {
+  const style = getComputedStyle(node);
+  const rect = node.getBoundingClientRect();
+  return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function scrapeLinkedInPage() {
   const pageType = detectPageType(location.href);
@@ -445,7 +489,7 @@ function scrapeExperienceSection() {
 }
 
 function scrapeEducationSection() {
-  return getGroupedProfileSectionItems("Education", groupDatedProfileItems)
+  return getGroupedProfileSectionItems("Education", groupEducationItems)
     .map(parseEducationItem)
     .filter((item) => item.school || item.degree || item.raw);
 }
@@ -529,6 +573,31 @@ function groupDatedProfileItems(lines) {
   return groupLinesByDateAnchors(cleaned, dateIndexes, 2);
 }
 
+function groupEducationItems(lines) {
+  const datedGroups = groupDatedProfileItems(lines);
+  if (datedGroups.length < lines.filter(Boolean).length) {
+    return datedGroups;
+  }
+
+  const grouped = [];
+  let current = [];
+
+  for (const line of lines.filter(Boolean)) {
+    current.push(line);
+
+    if (isSkillSummaryLine(line) && current.length > 1) {
+      grouped.push(current.join("\n"));
+      current = [];
+    }
+  }
+
+  if (current.length) {
+    grouped.push(current.join("\n"));
+  }
+
+  return grouped;
+}
+
 function groupCertificationItems(lines) {
   const cleaned = lines.filter(Boolean);
   const dateIndexes = cleaned
@@ -544,12 +613,16 @@ function groupCertificationItems(lines) {
 
 function groupLinesByDateAnchors(lines, dateIndexes, titleOffset) {
   const starts = dateIndexes
-    .map((index) => Math.max(0, index - titleOffset))
+    .map((index) => normalizeProfileGroupStart(lines, Math.max(0, index - titleOffset), index))
     .filter((start, index, list) => index === 0 || start > list[index - 1]);
 
   return starts
     .map((start, index) => lines.slice(start, starts[index + 1] || lines.length).join("\n"))
     .filter(Boolean);
+}
+
+function normalizeProfileGroupStart(_lines, start, _dateIndex) {
+  return start;
 }
 
 function groupSkillItems(lines) {
@@ -610,13 +683,26 @@ function isProfileSectionChrome(line) {
 
 function parseExperienceItem(raw) {
   const lines = cleanProfileLines(raw);
-  const [title = "", companyLine = ""] = lines;
-  const dateLine = findProfileDateLine(lines);
-  const locationLine = findProfileLocationLine(lines, [title, companyLine, dateLine]);
-  const companyParts = splitBulletText(companyLine);
+  const dateIndex = lines.findIndex(isProfileDateLine);
+  const dateLine = dateIndex >= 0 ? lines[dateIndex] : "";
+  const beforeDate = dateIndex >= 0 ? lines.slice(0, dateIndex) : lines.slice(0, 2);
+  const afterDate = dateIndex >= 0 ? lines.slice(dateIndex + 1) : lines.slice(2);
+  const skillSummaries = beforeDate.filter(isSkillSummaryLine);
+  const roleLines = beforeDate.filter((line) => !isSkillSummaryLine(line) && !isStandaloneDurationLine(line));
+  const leadingLocation = roleLines.length > 1 && isLikelyProfileLocationLine(roleLines[0]) ? roleLines.shift() : "";
+  const [title = "", companyLine = ""] = roleLines;
   const dateParts = splitBulletText(dateLine);
-  const excluded = new Set([title, companyLine, dateLine, locationLine].filter(Boolean));
-  const description = lines.filter((line) => !excluded.has(line)).join("\n");
+  const locationLine = leadingLocation || findProfileLocationLine(afterDate);
+  const companyParts = splitBulletText(companyLine);
+  const excluded = new Set([
+    ...beforeDate,
+    dateLine,
+    locationLine
+  ].filter(Boolean));
+  const description = [
+    ...skillSummaries,
+    ...afterDate.filter((line) => !excluded.has(line))
+  ].join("\n");
 
   return cleanObject({
     title,
@@ -713,16 +799,27 @@ function isSkillContextLine(line) {
     || /\bat\b/i.test(line);
 }
 
+function isSkillSummaryLine(line) {
+  return /^skills?:/i.test(line) || /\+\d+\s+skills?\b/i.test(line);
+}
+
+function isStandaloneDurationLine(line) {
+  return /^\d+\s*(yr|yrs|year|years)(\s+\d+\s*(mo|mos|month|months))?$|^\d+\s*(mo|mos|month|months)$/i.test(compactText(line));
+}
+
+function isLikelyProfileLocationLine(line) {
+  const value = cleanProfileLocation(line);
+  if (!value || isSkillSummaryLine(value) || isProfileDateLine(value) || isStandaloneDurationLine(value)) return false;
+  if (/skills?|\+\d+|salesforce|architecture|components|developer|workflow|validation|visualforce|data loader|automation|custom objects|process|communication|documentation|training|management|customer|support|onboarding|program|contract|renewals|e-learning|cbt|dashboard|reports?/i.test(value)) return false;
+  if (/remote|hybrid|on-site|onsite|metropolitan area|\barea\b|\bregion\b/i.test(value)) return true;
+  if (/^[A-Za-z .'-]+,\s*[A-Z]{2}$/.test(value)) return true;
+  if (/,/.test(value) && value.length <= 80 && /\b(united states|india|canada|germany|france|california|new york|texas|florida|washington|ca|ny|tx|uk|united kingdom)\b/i.test(value)) return true;
+  return false;
+}
+
 function findProfileLocationLine(lines, excludedLines = []) {
   const excluded = new Set(excludedLines.filter(Boolean));
-
-  return lines.find((line) => {
-    if (excluded.has(line)) return false;
-    if (findProfileDateLine([line])) return false;
-    if (/skills?|\+\d+|salesforce|architecture|components|developer/i.test(line)) return false;
-    if (/remote|hybrid|on-site|onsite|metropolitan area|area|region/i.test(line)) return true;
-    return /,\s*[A-Za-z][A-Za-z .'-]+/.test(line) && !/degree|university|college|school|license|certification/i.test(line);
-  }) || "";
+  return lines.find((line) => !excluded.has(line) && isLikelyProfileLocationLine(line)) || "";
 }
 
 function splitBulletText(value) {
@@ -864,7 +961,7 @@ function nameFromDocumentTitle() {
 function cleanProfileLocation(value) {
   const locationValue = compactText(value);
 
-  if (!locationValue || /^[·•|,\-\s]+$/.test(locationValue) || /^contact info$/i.test(locationValue)) {
+  if (!locationValue || /^[·•|,\-\s]+$/.test(locationValue) || /^contact info$/i.test(locationValue) || /·|\b(full-time|part-time|freelance|self-employed|internship|contract)\b/i.test(locationValue)) {
     return "";
   }
 
