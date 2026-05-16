@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LinkedIn Scraper</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Visible LinkedIn data</p>
+          <h1>Scraper</h1>
+        </div>
+        <span id="count" class="count">0</span>
+      </header>
+
+      <section class="controls" aria-label="Scraper controls">
+        <button id="scrape" class="primary" type="button">Scrape current page</button>
+        <button id="copy" type="button">Copy JSON</button>
+        <button id="download" type="button">Export JSON</button>
+        <button id="clear" class="danger" type="button">Clear</button>
+      </section>
+
+      <section class="status-panel" aria-live="polite">
+        <p id="status">Open a LinkedIn profile, company, or job page and click scrape.</p>
+      </section>
+
+      <section class="preview">
+        <div class="preview-head">
+          <h2>Latest result</h2>
+          <span id="pageType">none</span>
+        </div>
+        <pre id="output">{}</pre>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="LinkedIn scraper logo">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A66C2"/>
+      <stop offset="1" stop-color="#004182"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path fill="#fff" d="M28 49h16v51H28V49Zm8-25c5 0 9 4 9 9s-4 9-9 9-9-4-9-9 4-9 9-9Zm20 25h15v7h1c2-4 8-8 17-8 17 0 22 10 22 27v25H95V77c0-8-2-15-11-15-8 0-12 6-12 14v24H56V49Z"/>
+  <circle cx="92" cy="88" r="18" fill="#F6B73C"/>
+  <path fill="#14171A" d="m88 97-10-10 4-4 6 6 14-15 4 4-18 19Z"/>
+</svg>
