@@ -120,6 +120,11 @@ function renderSummary(record) {
     return;
   }
 
+  if (record.pageType === "company" && record.company) {
+    renderCompanySummary(record.company, record);
+    return;
+  }
+
   renderGenericSummary(record);
 }
 
@@ -168,6 +173,55 @@ function renderGenericSummary(record) {
   card.append(element("h2", "profile-name", title));
   if (subtitle) card.append(element("p", "profile-headline", subtitle));
   card.append(element("p", "summary-text", `${record.pageType} page scraped at ${new Date(record.scrapedAt).toLocaleString()}.`));
+  summaryEl.append(card);
+}
+
+function renderCompanySummary(company, record) {
+  const card = element("article", "company-card");
+
+  if (isHttpUrl(company.bannerImage)) {
+    const banner = document.createElement("img");
+    banner.className = "company-banner";
+    banner.src = company.bannerImage;
+    banner.alt = `${company.name || "Company"} banner`;
+    banner.addEventListener("error", () => banner.remove(), { once: true });
+    card.append(banner);
+  }
+
+  const body = element("div", "company-body");
+  const identity = element("div", "company-identity");
+  identity.append(createCompanyLogo(company));
+
+  const textWrap = element("div", "company-identity-text");
+  textWrap.append(element("h2", "profile-name", company.name || record.documentTitle || "Company"));
+  if (company.tagline) textWrap.append(element("p", "profile-headline", company.tagline));
+  const meta = [company.industry, company.headquarters, company.followers, company.companySize].filter(Boolean).join(" · ");
+  if (meta) textWrap.append(element("p", "profile-location", meta));
+  identity.append(textWrap);
+  body.append(identity);
+
+  const facts = [
+    ["Website", company.website],
+    ["Industry", company.industry],
+    ["Size", company.companySize],
+    ["Headquarters", company.headquarters],
+    ["Founded", company.founded],
+    ["Type", company.type]
+  ].filter(([, value]) => value);
+
+  if (facts.length) {
+    const factGrid = element("div", "company-facts");
+    facts.forEach(([label, value]) => factGrid.append(createFact(label, value)));
+    body.append(factGrid);
+  }
+
+  if (company.overview) {
+    const overview = element("div", "company-overview");
+    overview.append(element("h3", "", "Overview"), element("p", "summary-text", clamp(company.overview, 320)));
+    body.append(overview);
+  }
+
+  card.append(body);
   summaryEl.append(card);
 }
 
@@ -229,6 +283,31 @@ function formatEducationItem(item) {
     meta: [item.degree, item.fieldOfStudy, item.dateRange].filter(Boolean).join(" · "),
     detail: item.description || ""
   };
+}
+
+function createCompanyLogo(company) {
+  const logo = element("div", "company-logo");
+
+  if (isHttpUrl(company.logo)) {
+    const image = document.createElement("img");
+    image.src = company.logo;
+    image.alt = company.name ? `${company.name} logo` : "Company logo";
+    image.addEventListener("error", () => {
+      image.remove();
+      logo.textContent = initials(company.name || "Company");
+    }, { once: true });
+    logo.append(image);
+  } else {
+    logo.textContent = initials(company.name || "Company");
+  }
+
+  return logo;
+}
+
+function createFact(label, value) {
+  const fact = element("div", "company-fact");
+  fact.append(element("span", "", label), element("strong", "", value));
+  return fact;
 }
 
 function createAvatar(name, imageUrl) {
