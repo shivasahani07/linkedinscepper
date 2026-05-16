@@ -133,7 +133,7 @@ function scrapeCompany() {
   const overview = sections["About us"] || sections.Overview || companyOverviewFromLines();
 
   return cleanObject({
-    name: firstText(["main h1", "h1", ".org-top-card-summary__title"]) || companyNameFromDocumentTitle() || companyNameFromUrl(),
+    name: cleanCompanyName(firstText(["main h1", "h1", ".org-top-card-summary__title"]) || companyNameFromDocumentTitle() || companyNameFromUrl()),
     tagline: firstText([".org-top-card-summary__tagline", "main h1 + p", "main h1 + div"]) || companyTaglineFromLines(),
     overview,
     website: facts.website || findCompanyWebsite(),
@@ -148,7 +148,8 @@ function scrapeCompany() {
     companyUrl: document.querySelector("link[rel='canonical']")?.href || location.href,
     locations: parseListSection(sections.Locations || companySectionAfterLabel("Locations")),
     jobs: parseListSection(sections.Jobs),
-    logo: getCompanyLogo()
+    logo: getCompanyLogo(),
+    bannerImage: getCompanyBannerImage()
   });
 }
 
@@ -885,7 +886,10 @@ function scrapeCompanyFacts() {
   const summaryFacts = companyHeaderSummaryFacts(lines);
   const facts = {};
 
-  facts.website = companyDomValueAfterLabel("Website") || companyValueAfterLabel(lines, "Website");
+  facts.website = firstLikelyCompanyWebsite([
+    companyDomValueAfterLabel("Website"),
+    companyValueAfterLabel(lines, "Website")
+  ]);
   facts.industry = companyDomValueAfterLabel("Industry") || companyValueAfterLabel(lines, "Industry") || summaryFacts.industry;
   facts.companySize = companyDomValueAfterLabel("Company size") || companyValueAfterLabel(lines, "Company size") || summaryFacts.companySize;
   facts.headquarters = companyDomValueAfterLabel("Headquarters") || companyValueAfterLabel(lines, "Headquarters") || summaryFacts.headquarters;
@@ -971,7 +975,11 @@ function getCompanyStopLabels() {
 }
 
 function companyNameFromDocumentTitle() {
-  return compactText(document.title.replace(/:\s*(about|overview|jobs|people).*$/i, "").replace(/\s*\|\s*LinkedIn.*$/i, ""));
+  return cleanCompanyName(document.title.replace(/:\s*(about|overview|jobs|people).*$/i, "").replace(/\s*\|\s*LinkedIn.*$/i, ""));
+}
+
+function cleanCompanyName(value) {
+  return compactText(value).replace(/^\(\d+\)\s*/, "");
 }
 
 function companyNameFromUrl() {
@@ -1023,8 +1031,11 @@ function isCompanyChromeLine(line) {
 }
 
 function findCompanyWebsite() {
-  const visibleWebsite = companyDomValueAfterLabel("Website") || companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website");
-  if (isLikelyCompanyWebsite(visibleWebsite)) return visibleWebsite;
+  const visibleWebsite = firstLikelyCompanyWebsite([
+    companyDomValueAfterLabel("Website"),
+    companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website")
+  ]);
+  if (visibleWebsite) return visibleWebsite;
 
   const candidates = [];
   for (const item of getUsefulAnchors()) {
@@ -1033,6 +1044,10 @@ function findCompanyWebsite() {
     candidates.push(externalUrlFromLinkedInRedirect(item.href));
   }
 
+  return firstLikelyCompanyWebsite(candidates);
+}
+
+function firstLikelyCompanyWebsite(candidates) {
   return candidates
     .filter(Boolean)
     .sort((a, b) => companyWebsiteScore(b) - companyWebsiteScore(a))
@@ -1067,7 +1082,7 @@ function isExternalCompanyUrl(value) {
 }
 
 function isLikelyCompanyWebsite(value) {
-  return isExternalCompanyUrl(value) && companyWebsiteScore(value) > 0;
+  return isExternalCompanyUrl(value) && companyWebsiteScore(value) >= 80;
 }
 
 function companyWebsiteScore(value) {
@@ -1100,7 +1115,38 @@ function normalizeWebsiteToken(value) {
 }
 
 function getCompanyLogo() {
-  return meta("og:image") || imageUrlFromNode(document.querySelector(".org-top-card-primary-content__logo, .org-top-card-summary__logo img, img[alt*='logo'], main img"));
+  const selectors = [
+    ".org-top-card-primary-content__logo img",
+    ".org-top-card-primary-content__logo",
+    ".org-top-card-summary__logo img",
+    "img[src*='company-logo']",
+    "img[alt*='logo']"
+  ];
+  const image = firstImageUrl(selectors, (url) => !isCompanyBannerUrl(url));
+  return image || (isCompanyBannerUrl(meta("og:image")) ? "" : meta("og:image"));
+}
+
+function getCompanyBannerImage() {
+  return firstImageUrl([
+    ".org-top-card__cover-photo img",
+    ".profile-background-image__image",
+    "img[src*='profile-displaybackgroundimage']"
+  ], isCompanyBannerUrl) || (isCompanyBannerUrl(meta("og:image")) ? meta("og:image") : "");
+}
+
+function firstImageUrl(selectors, predicate = Boolean) {
+  for (const selector of selectors) {
+    for (const node of document.querySelectorAll(selector)) {
+      const url = imageUrlFromNode(node);
+      if (url && predicate(url)) return url;
+    }
+  }
+
+  return "";
+}
+
+function isCompanyBannerUrl(url) {
+  return /profile-displaybackgroundimage|background|cover/i.test(url || "");
 }
 
 function scrapeJobCriteria(root = document.body) {
