@@ -143,7 +143,7 @@ function scrapeCompany() {
     founded: facts.founded,
     type: facts.type,
     specialties: facts.specialties,
-    followers: facts.followers || findTextMatching(/followers/i),
+    followers: facts.followers,
     employeesOnLinkedIn: facts.employeesOnLinkedIn,
     companyUrl: document.querySelector("link[rel='canonical']")?.href || location.href,
     locations: parseListSection(sections.Locations || companySectionAfterLabel("Locations")),
@@ -1209,27 +1209,72 @@ function getCompanyLogo() {
     "img[src*='company-logo']",
     "img[alt*='logo']"
   ];
-  const image = firstImageUrl(selectors, (url) => !isCompanyBannerUrl(url));
-  return image || (isCompanyBannerUrl(meta("og:image")) ? "" : meta("og:image"));
+  const image = firstCompanyImageUrl(selectors, (url, node) => !isCompanyBannerUrl(url) && isCurrentCompanyImage(node, url));
+  const fallback = meta("og:image");
+  return image || (!isCompanyBannerUrl(fallback) && isCurrentCompanyImage(null, fallback) ? fallback : "");
 }
 
 function getCompanyBannerImage() {
-  return firstImageUrl([
+  return firstCompanyImageUrl([
     ".org-top-card__cover-photo img",
     ".profile-background-image__image",
     "img[src*='profile-displaybackgroundimage']"
-  ], isCompanyBannerUrl) || (isCompanyBannerUrl(meta("og:image")) ? meta("og:image") : "");
+  ], (url, node) => isCompanyBannerUrl(url) && isVisibleCandidateElement(node)) || (isCompanyBannerUrl(meta("og:image")) ? meta("og:image") : "");
 }
 
-function firstImageUrl(selectors, predicate = Boolean) {
-  for (const selector of selectors) {
-    for (const node of document.querySelectorAll(selector)) {
-      const url = imageUrlFromNode(node);
-      if (url && predicate(url)) return url;
+function firstCompanyImageUrl(selectors, predicate = Boolean) {
+  const roots = companyImageRoots();
+
+  for (const root of roots) {
+    for (const selector of selectors) {
+      for (const node of root.querySelectorAll(selector)) {
+        const url = imageUrlFromNode(node);
+        if (url && predicate(url, node)) return url;
+      }
     }
   }
 
   return "";
+}
+
+function companyImageRoots() {
+  const roots = [];
+  const heading = [...document.querySelectorAll("main h1, h1")]
+    .find((node) => normalizeLabel(node.innerText || node.textContent || "") === normalizeLabel(companyNameFromDocumentTitle() || companyNameFromUrl()));
+  const topCard = heading?.closest?.("section, article, div");
+  if (topCard) roots.push(topCard);
+  const main = document.querySelector("main");
+  if (main && !roots.includes(main)) roots.push(main);
+  if (!roots.length) roots.push(document);
+  return roots;
+}
+
+function isCurrentCompanyImage(node, url) {
+  if (!url || isCompanyBannerUrl(url) || !isVisibleCandidateElement(node)) return false;
+
+  const alt = compactText(node?.alt || node?.getAttribute?.("alt") || "");
+  const companyToken = normalizeWebsiteToken(companyNameFromDocumentTitle() || companyNameFromUrl());
+  const slug = companySlugFromUrl();
+  const imageTokenSource = normalizeWebsiteToken(`${alt} ${url}`);
+
+  if (alt && companyToken && !normalizeWebsiteToken(alt).includes(companyToken)) return false;
+  if (/company-logo/i.test(url) && (imageTokenSource.includes(slug) || imageTokenSource.includes(companyToken))) return true;
+  if (/company-logo/i.test(url) && !alt && !slug && !companyToken) return true;
+  if (/company-logo/i.test(url) && !/_[a-z0-9-]*logo/i.test(url)) return true;
+  return Boolean(alt && /logo/i.test(alt));
+}
+
+function isVisibleCandidateElement(node) {
+  if (!node) return true;
+
+  try {
+    const style = getComputedStyle(node);
+    if (style.visibility === "hidden" || style.display === "none") return false;
+  } catch {}
+
+  const rect = node.getBoundingClientRect?.();
+  if (rect && rect.width === 0 && rect.height === 0) return false;
+  return true;
 }
 
 function isCompanyBannerUrl(url) {
