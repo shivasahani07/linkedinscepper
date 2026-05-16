@@ -998,7 +998,7 @@ function companyTaglineFromLines() {
   const index = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(name));
 
   if (index >= 0) {
-    return lines.slice(index + 1).find((line) => !isCompanyChromeLine(line) && !getCompanyStopLabels().has(normalizeLabel(line)) && !/followers|employees/i.test(line)) || "";
+    return lines.slice(index + 1).find((line) => !isCompanyChromeLine(line) && !getCompanyStopLabels().has(normalizeLabel(line)) && !isExternalCompanyUrl(line) && !/followers|employees/i.test(line)) || "";
   }
 
   return "";
