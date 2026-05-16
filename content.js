@@ -951,7 +951,7 @@ function companyValueAfterLabel(lines, label) {
       return cleanCompanyFactValue(lines[index + 1] || "");
     }
 
-    if (normalized.startsWith(`${normalizedLabel} `) || normalized.startsWith(`${normalizedLabel}:`)) {
+    if (normalized.startsWith(`${normalizedLabel}:`)) {
       const inlineValue = line.slice(label.length).replace(/^\s*:?\s*/, "");
       if (inlineValue && !stopLabels.has(normalizeLabel(inlineValue))) {
         return cleanCompanyFactValue(inlineValue);
@@ -998,7 +998,7 @@ function companyTaglineFromLines() {
   const index = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(name));
 
   if (index >= 0) {
-    return lines.slice(index + 1).find((line) => !isCompanyChromeLine(line) && !/followers|employees/i.test(line)) || "";
+    return lines.slice(index + 1).find((line) => !isCompanyChromeLine(line) && !getCompanyStopLabels().has(normalizeLabel(line)) && !/followers|employees/i.test(line)) || "";
   }
 
   return "";
