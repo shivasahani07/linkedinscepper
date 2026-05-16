@@ -38,3 +38,5 @@ Each saved record includes:
 - one of `profile`, `company`, `job`, or `generic`
 
 LinkedIn changes its page markup often, so the scraper combines stable URL detection, visible headings, page metadata, JSON-LD, and text-section heuristics.
+
+For profile pages, the `profile` object now includes `profilePicture`/`profileImage` plus structured `experience`, `education`, and `skills` arrays. Each structured item keeps a `raw` field alongside parsed fields so exports remain useful when LinkedIn markup changes.
