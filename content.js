@@ -62,18 +62,18 @@ function scrapeProfile() {
   const profilePicture = getProfilePicture();
 
   return cleanObject({
-    name: firstText(["main h1", "h1"]),
+    name: firstText(["main h1", "h1"]) || nameFromDocumentTitle(),
     headline: firstText([
       "main h1 + div",
       ".text-body-medium.break-words",
       "[data-generated-suggestion-target] ~ div"
     ]),
-    location: findNearbyText(["Location", "Contact info"]) || textFromProfileTopCard(2),
+    location: cleanProfileLocation(findNearbyText(["Location", "Contact info"]) || textFromProfileTopCard(2)),
     profileUrl: document.querySelector("link[rel='canonical']")?.href || location.href,
     about: sections.About,
     experience: scrapeExperienceSection(),
     education: scrapeEducationSection(),
-    licensesAndCertifications: scrapeGenericProfileSection("Licenses & certifications"),
+    licensesAndCertifications: scrapeCertificationSection(),
     skills: scrapeSkillsSection(),
     projects: scrapeGenericProfileSection("Projects"),
     volunteerExperience: scrapeGenericProfileSection("Volunteer experience"),
@@ -439,32 +439,45 @@ function findNamedSection(name, root = document) {
 }
 
 function scrapeExperienceSection() {
-  return scrapeProfileSection("Experience").map(parseExperienceItem).filter((item) => item.title || item.company || item.raw);
+  return getGroupedProfileSectionItems("Experience", groupDatedProfileItems)
+    .map(parseExperienceItem)
+    .filter((item) => item.title || item.company || item.raw);
 }
 
 function scrapeEducationSection() {
-  return scrapeProfileSection("Education").map(parseEducationItem).filter((item) => item.school || item.degree || item.raw);
+  return getGroupedProfileSectionItems("Education", groupDatedProfileItems)
+    .map(parseEducationItem)
+    .filter((item) => item.school || item.degree || item.raw);
+}
+
+function scrapeCertificationSection() {
+  return getGroupedProfileSectionItems("Licenses & certifications", groupCertificationItems)
+    .map(parseCertificationItem)
+    .filter((item) => item.name || item.issuer || item.raw);
 }
 
 function scrapeSkillsSection() {
   const section = findNamedSection("Skills");
   if (!section) return [];
 
-  const itemNodes = getProfileSectionItemNodes(section);
-  const rawItems = itemNodes.length
-    ? itemNodes.map((node) => cleanProfileItemText(node.innerText, "Skills"))
-    : compactLines(trimSectionText(section.innerText, "Skills"))
-      .filter((line) => !isProfileSectionChrome(line))
-      .map((line) => line.replace(/\s+Skill name\s*$/i, ""));
+  const nodeItems = getProfileSectionItemNodes(section)
+    .map((node) => cleanProfileItemText(node.innerText, "Skills"))
+    .filter(Boolean);
+  const groupedItems = groupSkillItems(cleanProfileLines(trimSectionText(section.innerText, "Skills"))
+    .map((line) => line.replace(/\s+Skill name\s*$/i, "")));
+  const rawItems = shouldPreferGroupedLines(nodeItems, groupedItems)
+    ? groupedItems
+    : nodeItems.length ? nodeItems : groupedItems;
 
   return rawItems
     .map(parseSkillItem)
-    .filter((item) => item.name)
+    .filter((item) => item.name && !isSkillContextLine(item.name))
     .slice(0, 50);
 }
 
 function scrapeGenericProfileSection(name) {
-  return scrapeProfileSection(name).map((raw) => cleanObject({ title: compactLines(raw)[0] || "", details: compactLines(raw).slice(1).join("\n"), raw }));
+  return getGroupedProfileSectionItems(name, groupDatedProfileItems)
+    .map((raw) => cleanObject({ title: compactLines(raw)[0] || "", details: compactLines(raw).slice(1).join("\n"), raw }));
 }
 
 function scrapeProfileSection(name) {
@@ -477,6 +490,85 @@ function scrapeProfileSection(name) {
     : parseListSection(trimSectionText(section.innerText, name));
 
   return items.filter(Boolean).slice(0, 50);
+}
+
+function getGroupedProfileSectionItems(name, groupItems) {
+  const section = findNamedSection(name);
+  if (!section) return [];
+
+  const nodeItems = getProfileSectionItemNodes(section)
+    .map((node) => cleanProfileItemText(node.innerText, name))
+    .filter(Boolean);
+  const groupedItems = groupItems(cleanProfileLines(trimSectionText(section.innerText, name)));
+
+  if (shouldPreferGroupedLines(nodeItems, groupedItems)) {
+    return groupedItems.slice(0, 50);
+  }
+
+  return (nodeItems.length ? nodeItems : groupedItems).slice(0, 50);
+}
+
+function shouldPreferGroupedLines(nodeItems, groupedItems) {
+  if (!groupedItems.length) return false;
+  if (!nodeItems.length) return true;
+
+  const singleLineCount = nodeItems.filter((item) => compactLines(item).length <= 1).length;
+  return singleLineCount / nodeItems.length > 0.5 && groupedItems.length < nodeItems.length;
+}
+
+function groupDatedProfileItems(lines) {
+  const cleaned = lines.filter(Boolean);
+  const dateIndexes = cleaned
+    .map((line, index) => isProfileDateLine(line) ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (!dateIndexes.length) {
+    return cleaned;
+  }
+
+  return groupLinesByDateAnchors(cleaned, dateIndexes, 2);
+}
+
+function groupCertificationItems(lines) {
+  const cleaned = lines.filter(Boolean);
+  const dateIndexes = cleaned
+    .map((line, index) => isCertificationDateLine(line) ? index : -1)
+    .filter((index) => index >= 0);
+
+  if (!dateIndexes.length) {
+    return cleaned;
+  }
+
+  return groupLinesByDateAnchors(cleaned, dateIndexes, 2);
+}
+
+function groupLinesByDateAnchors(lines, dateIndexes, titleOffset) {
+  const starts = dateIndexes
+    .map((index) => Math.max(0, index - titleOffset))
+    .filter((start, index, list) => index === 0 || start > list[index - 1]);
+
+  return starts
+    .map((start, index) => lines.slice(start, starts[index + 1] || lines.length).join("\n"))
+    .filter(Boolean);
+}
+
+function groupSkillItems(lines) {
+  const grouped = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (isSkillContextLine(line)) continue;
+
+    const itemLines = [line];
+    while (isSkillContextLine(lines[index + 1])) {
+      itemLines.push(lines[index + 1]);
+      index += 1;
+    }
+
+    grouped.push(itemLines.join("\n"));
+  }
+
+  return grouped;
 }
 
 function getProfileSectionItemNodes(section) {
@@ -556,12 +648,34 @@ function parseEducationItem(raw) {
   });
 }
 
+
+function parseCertificationItem(raw) {
+  const lines = cleanProfileLines(raw);
+  const [name = ""] = lines;
+  const issued = lines.find((line) => /^issued\b/i.test(line)) || "";
+  const expires = lines.find((line) => /^expires\b/i.test(line)) || "";
+  const credentialId = lines.find((line) => /^credential id\b/i.test(line)) || "";
+  const issuer = lines.find((line, index) => index > 0 && !isCertificationDateLine(line) && !/^credential/i.test(line)) || "";
+  const excluded = new Set([name, issuer, issued, expires, credentialId].filter(Boolean));
+  const details = lines.filter((line) => !excluded.has(line)).join("\n");
+
+  return cleanObject({
+    name,
+    issuer,
+    issued,
+    expires,
+    credentialId: credentialId.replace(/^credential id\s*/i, ""),
+    details,
+    raw
+  });
+}
+
 function parseSkillItem(raw) {
   const lines = cleanProfileLines(raw)
     .filter((line) => !/^skill name$/i.test(line));
   const [name = ""] = lines;
   const endorsements = lines.find((line) => /endorsements?/i.test(line)) || "";
-  const associatedWith = lines.find((line) => /associated with|used at|featured/i.test(line)) || "";
+  const associatedWith = lines.find((line) => /associated with|used at|featured|\bat\b/i.test(line)) || "";
   const excluded = new Set([name, endorsements, associatedWith].filter(Boolean));
   const details = lines.filter((line) => !excluded.has(line)).join("\n");
 
@@ -580,8 +694,23 @@ function cleanProfileLines(raw) {
 }
 
 function findProfileDateLine(lines) {
-  return lines.find((line) => /\b(present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|\d{4})\b/i.test(line)
-    && /-|–|—|·|\u00b7|\b\d+\s*(yr|yrs|year|years|mo|mos|month|months)\b/i.test(line)) || "";
+  return lines.find(isProfileDateLine) || "";
+}
+
+function isProfileDateLine(line) {
+  return /\b(present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|\d{4})\b/i.test(line)
+    && /-|–|—|·|\u00b7|\b\d+\s*(yr|yrs|year|years|mo|mos|month|months)\b/i.test(line);
+}
+
+function isCertificationDateLine(line) {
+  return /^(issued|expires)\b/i.test(line)
+    || /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{4}\b/i.test(line);
+}
+
+function isSkillContextLine(line) {
+  return /^(associated with|used at|featured|endorsed by)\b/i.test(line)
+    || /\bendorsements?\b/i.test(line)
+    || /\bat\b/i.test(line);
 }
 
 function findProfileLocationLine(lines, excludedLines = []) {
@@ -590,7 +719,8 @@ function findProfileLocationLine(lines, excludedLines = []) {
   return lines.find((line) => {
     if (excluded.has(line)) return false;
     if (findProfileDateLine([line])) return false;
-    if (/remote|hybrid|on-site|onsite/i.test(line)) return true;
+    if (/skills?|\+\d+|salesforce|architecture|components|developer/i.test(line)) return false;
+    if (/remote|hybrid|on-site|onsite|metropolitan area|area|region/i.test(line)) return true;
     return /,\s*[A-Za-z][A-Za-z .'-]+/.test(line) && !/degree|university|college|school|license|certification/i.test(line);
   }) || "";
 }
@@ -724,6 +854,21 @@ function textFromProfileTopCard(lineOffset) {
   const topCard = document.querySelector("main section");
   const lines = compactLines(topCard?.innerText || "");
   return lines[lineOffset] || "";
+}
+
+
+function nameFromDocumentTitle() {
+  return compactText(document.title.replace(/\s*\|\s*LinkedIn.*$/i, ""));
+}
+
+function cleanProfileLocation(value) {
+  const locationValue = compactText(value);
+
+  if (!locationValue || /^[·•|,\-\s]+$/.test(locationValue) || /^contact info$/i.test(locationValue)) {
+    return "";
+  }
+
+  return locationValue;
 }
 
 function findNearbyText(labels) {
