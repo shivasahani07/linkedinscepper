@@ -1022,7 +1022,7 @@ function cleanCompanyFactValue(value) {
 }
 
 function getCompanyStopLabels() {
-  return new Set(["overview", "about", "about us", "website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "updates", "jobs", "employees at"]);
+  return new Set(["home", "overview", "about", "about us", "services", "products", "website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "updates", "posts", "jobs", "people", "employees at"]);
 }
 
 function companyNameFromDocumentTitle() {
@@ -1077,7 +1077,7 @@ function companySectionAfterLabel(label) {
 }
 
 function isCompanyChromeLine(line) {
-  return /^(home|about|posts|jobs|people|show more|show less|follow|following|visit website)$/i.test(line)
+  return /^(home|about|services|products|posts|jobs|people|show more|show less|follow|following|visit website)$/i.test(line)
     || /^page ·/i.test(line);
 }
 
