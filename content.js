@@ -881,20 +881,55 @@ function imageUrlFromNode(node) {
 }
 
 function scrapeCompanyFacts() {
-  const textValue = compactText(document.body?.innerText || "");
+  const lines = compactLines(document.body?.innerText || "");
   const facts = {};
 
-  facts.website = valueAfterLabel(textValue, "Website");
-  facts.industry = valueAfterLabel(textValue, "Industry");
-  facts.companySize = valueAfterLabel(textValue, "Company size") || findLine(compactLines(textValue), /\bemployees\b/i);
-  facts.headquarters = valueAfterLabel(textValue, "Headquarters");
-  facts.founded = valueAfterLabel(textValue, "Founded");
-  facts.type = valueAfterLabel(textValue, "Type");
-  facts.specialties = valueAfterLabel(textValue, "Specialties");
-  facts.followers = findLine(compactLines(textValue), /followers/i);
-  facts.employeesOnLinkedIn = findLine(compactLines(textValue), /employees on linkedin|associated members/i);
+  facts.website = companyValueAfterLabel(lines, "Website");
+  facts.industry = companyValueAfterLabel(lines, "Industry");
+  facts.companySize = companyValueAfterLabel(lines, "Company size") || findLine(lines, /\bemployees\b/i);
+  facts.headquarters = companyValueAfterLabel(lines, "Headquarters");
+  facts.founded = companyValueAfterLabel(lines, "Founded");
+  facts.type = companyValueAfterLabel(lines, "Type");
+  facts.specialties = companyValueAfterLabel(lines, "Specialties");
+  facts.followers = findLine(lines, /followers/i);
+  facts.employeesOnLinkedIn = findLine(lines, /employees on linkedin|associated members/i);
 
   return cleanObject(facts);
+}
+
+function companyValueAfterLabel(lines, label) {
+  const normalizedLabel = normalizeLabel(label);
+  const stopLabels = getCompanyStopLabels();
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const normalized = normalizeLabel(line);
+
+    if (normalized === normalizedLabel) {
+      return cleanCompanyFactValue(lines[index + 1] || "");
+    }
+
+    if (normalized.startsWith(`${normalizedLabel} `) || normalized.startsWith(`${normalizedLabel}:`)) {
+      const inlineValue = line.slice(label.length).replace(/^\s*:?\s*/, "");
+      if (inlineValue && !stopLabels.has(normalizeLabel(inlineValue))) {
+        return cleanCompanyFactValue(inlineValue);
+      }
+    }
+  }
+
+  return "";
+}
+
+function cleanCompanyFactValue(value) {
+  const cleaned = compactText(value);
+  if (!cleaned || isCompanyChromeLine(cleaned) || getCompanyStopLabels().has(normalizeLabel(cleaned))) {
+    return "";
+  }
+  return cleaned;
+}
+
+function getCompanyStopLabels() {
+  return new Set(["overview", "about", "about us", "website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "updates", "jobs", "employees at"]);
 }
 
 function companyNameFromDocumentTitle() {
@@ -932,7 +967,7 @@ function companySectionAfterLabel(label) {
   const start = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(label));
   if (start < 0) return "";
 
-  const stopLabels = new Set(["website", "industry", "company size", "headquarters", "type", "founded", "specialties", "locations", "updates", "jobs"]);
+  const stopLabels = getCompanyStopLabels();
   const values = [];
 
   for (const line of lines.slice(start + 1)) {
@@ -950,16 +985,47 @@ function isCompanyChromeLine(line) {
 }
 
 function findCompanyWebsite() {
-  const direct = findFirstHref(/https?:\/\/(?!www\.linkedin\.com)/i);
-  if (direct) return direct;
+  const visibleWebsite = companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website");
+  if (isExternalCompanyUrl(visibleWebsite)) return visibleWebsite;
 
-  const linkedInRedirect = getUsefulAnchors().find((item) => /linkedin\.com\/redir\/redirect/i.test(item.href));
-  if (!linkedInRedirect) return "";
+  for (const item of getUsefulAnchors()) {
+    const textUrl = extractExternalCompanyUrl(item.text);
+    if (textUrl) return textUrl;
 
+    const hrefUrl = extractExternalCompanyUrl(item.href);
+    if (hrefUrl) return hrefUrl;
+
+    const redirectUrl = externalUrlFromLinkedInRedirect(item.href);
+    if (redirectUrl) return redirectUrl;
+  }
+
+  return "";
+}
+
+function externalUrlFromLinkedInRedirect(value) {
   try {
-    return new URL(linkedInRedirect.href).searchParams.get("url") || linkedInRedirect.href;
+    const url = new URL(value);
+    if (!/linkedin\.com$/i.test(url.hostname) && !/\.linkedin\.com$/i.test(url.hostname)) return "";
+    const redirected = url.searchParams.get("url") || url.searchParams.get("u") || "";
+    return extractExternalCompanyUrl(redirected);
   } catch {
-    return linkedInRedirect.href;
+    return "";
+  }
+}
+
+function extractExternalCompanyUrl(value) {
+  const match = compactText(value).match(/https?:\/\/[^\s)]+/i);
+  if (!match) return "";
+  const candidate = match[0].replace(/[.,;]+$/, "");
+  return isExternalCompanyUrl(candidate) ? candidate : "";
+}
+
+function isExternalCompanyUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol.startsWith("http") && !/(^|\.)linkedin\.com$/i.test(url.hostname);
+  } catch {
+    return false;
   }
 }
 
