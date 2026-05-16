@@ -882,19 +882,57 @@ function imageUrlFromNode(node) {
 
 function scrapeCompanyFacts() {
   const lines = compactLines(document.body?.innerText || "");
+  const summaryFacts = companyHeaderSummaryFacts(lines);
   const facts = {};
 
-  facts.website = companyValueAfterLabel(lines, "Website");
-  facts.industry = companyValueAfterLabel(lines, "Industry");
-  facts.companySize = companyValueAfterLabel(lines, "Company size") || findLine(lines, /\bemployees\b/i);
-  facts.headquarters = companyValueAfterLabel(lines, "Headquarters");
-  facts.founded = companyValueAfterLabel(lines, "Founded");
-  facts.type = companyValueAfterLabel(lines, "Type");
-  facts.specialties = companyValueAfterLabel(lines, "Specialties");
-  facts.followers = findLine(lines, /followers/i);
+  facts.website = companyDomValueAfterLabel("Website") || companyValueAfterLabel(lines, "Website");
+  facts.industry = companyDomValueAfterLabel("Industry") || companyValueAfterLabel(lines, "Industry") || summaryFacts.industry;
+  facts.companySize = companyDomValueAfterLabel("Company size") || companyValueAfterLabel(lines, "Company size") || summaryFacts.companySize;
+  facts.headquarters = companyDomValueAfterLabel("Headquarters") || companyValueAfterLabel(lines, "Headquarters") || summaryFacts.headquarters;
+  facts.founded = companyDomValueAfterLabel("Founded") || companyValueAfterLabel(lines, "Founded");
+  facts.type = companyDomValueAfterLabel("Type") || companyValueAfterLabel(lines, "Type");
+  facts.specialties = companyDomValueAfterLabel("Specialties") || companyValueAfterLabel(lines, "Specialties");
+  facts.followers = summaryFacts.followers || findLine(lines, /followers/i);
   facts.employeesOnLinkedIn = findLine(lines, /employees on linkedin|associated members/i);
 
   return cleanObject(facts);
+}
+
+function companyHeaderSummaryFacts(lines) {
+  const summaryLine = lines.find((line) => /followers/i.test(line) && /employees/i.test(line) && /·|•|\|/.test(line)) || "";
+  const parts = splitCompanySummary(summaryLine);
+
+  return cleanObject({
+    industry: parts.find((part) => !/followers|employees/i.test(part) && !/,/.test(part)),
+    headquarters: parts.find((part) => /,/.test(part) && !/followers|employees/i.test(part)),
+    followers: parts.find((part) => /followers/i.test(part)),
+    companySize: parts.find((part) => /employees/i.test(part))
+  });
+}
+
+function splitCompanySummary(value) {
+  return compactText(value)
+    .split(/·|•|\|/)
+    .map((part) => compactText(part))
+    .filter(Boolean);
+}
+
+function companyDomValueAfterLabel(label) {
+  const selectors = "dt, dd, h2, h3, span, div, p";
+  const labelNode = [...document.querySelectorAll(selectors)]
+    .find((node) => normalizeLabel(node.innerText || node.textContent || "") === normalizeLabel(label));
+  if (!labelNode) return "";
+
+  for (let scope = labelNode.parentElement; scope && scope !== document.body; scope = scope.parentElement) {
+    const link = label === "Website" ? [...scope.querySelectorAll("a[href]")].map((anchor) => anchor.href).find(isLikelyCompanyWebsite) : "";
+    if (link) return link;
+
+    const lines = compactLines(scope.innerText || scope.textContent || "");
+    const value = companyValueAfterLabel(lines, label);
+    if (value && value !== label) return value;
+  }
+
+  return "";
 }
 
 function companyValueAfterLabel(lines, label) {
@@ -985,21 +1023,20 @@ function isCompanyChromeLine(line) {
 }
 
 function findCompanyWebsite() {
-  const visibleWebsite = companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website");
-  if (isExternalCompanyUrl(visibleWebsite)) return visibleWebsite;
+  const visibleWebsite = companyDomValueAfterLabel("Website") || companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website");
+  if (isLikelyCompanyWebsite(visibleWebsite)) return visibleWebsite;
 
+  const candidates = [];
   for (const item of getUsefulAnchors()) {
-    const textUrl = extractExternalCompanyUrl(item.text);
-    if (textUrl) return textUrl;
-
-    const hrefUrl = extractExternalCompanyUrl(item.href);
-    if (hrefUrl) return hrefUrl;
-
-    const redirectUrl = externalUrlFromLinkedInRedirect(item.href);
-    if (redirectUrl) return redirectUrl;
+    candidates.push(extractExternalCompanyUrl(item.text));
+    candidates.push(extractExternalCompanyUrl(item.href));
+    candidates.push(externalUrlFromLinkedInRedirect(item.href));
   }
 
-  return "";
+  return candidates
+    .filter(Boolean)
+    .sort((a, b) => companyWebsiteScore(b) - companyWebsiteScore(a))
+    .find(isLikelyCompanyWebsite) || "";
 }
 
 function externalUrlFromLinkedInRedirect(value) {
@@ -1027,6 +1064,39 @@ function isExternalCompanyUrl(value) {
   } catch {
     return false;
   }
+}
+
+function isLikelyCompanyWebsite(value) {
+  return isExternalCompanyUrl(value) && companyWebsiteScore(value) > 0;
+}
+
+function companyWebsiteScore(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+    const slug = companySlugFromUrl();
+    const name = normalizeWebsiteToken(companyNameFromDocumentTitle() || companyNameFromUrl());
+
+    if (isDisallowedCompanyWebsiteHost(host)) return 0;
+    if (slug && host.includes(slug)) return 100;
+    if (name && host.includes(name)) return 90;
+    if (/\.(com|io|ai|dev|app|co|org|net)$/i.test(host)) return 10;
+    return 1;
+  } catch {
+    return 0;
+  }
+}
+
+function isDisallowedCompanyWebsiteHost(host) {
+  return /(^|\.)(linkedin\.com|google\.com|drive\.google\.com|docs\.google\.com|facebook\.com|twitter\.com|x\.com|instagram\.com|youtube\.com|youtu\.be|github\.com|bit\.ly|tinyurl\.com)$/i.test(host);
+}
+
+function companySlugFromUrl() {
+  return normalizeWebsiteToken(location.pathname.match(/^\/(?:company|school)\/([^/]+)/)?.[1] || "");
+}
+
+function normalizeWebsiteToken(value) {
+  return compactText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function getCompanyLogo() {
