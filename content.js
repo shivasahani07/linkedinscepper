@@ -882,7 +882,7 @@ function imageUrlFromNode(node) {
 }
 
 function scrapeCompanyFacts() {
-  const lines = compactLines(document.body?.innerText || "");
+  const lines = companyTextLines();
   const summaryFacts = companyHeaderSummaryFacts(lines);
   const facts = {};
 
@@ -912,6 +912,57 @@ function companyHeaderSummaryFacts(lines) {
     followers: parts.find((part) => /followers/i.test(part)),
     companySize: parts.find((part) => /employees/i.test(part))
   });
+}
+
+
+function companyTextLines() {
+  const body = document.body;
+  const lines = [
+    ...compactLines(body?.innerText || ""),
+    ...compactLines(body?.textContent || "")
+  ];
+
+  if (lines.length) {
+    return dedupeLines(lines);
+  }
+
+  return dedupeLines([...document.querySelectorAll("main h1, main h2, main h3, main dt, main dd, main span, main p, main a")]
+    .flatMap((node) => compactLines(node.innerText || node.textContent || "")));
+}
+
+function companyOverviewFromDom() {
+  const heading = [...document.querySelectorAll("main h2, main h3, h2, h3")]
+    .find((node) => normalizeLabel(node.innerText || node.textContent || "") === "overview");
+  if (!heading) return "";
+
+  for (let scope = heading.parentElement; scope && scope !== document.body; scope = scope.parentElement) {
+    const lines = compactLines(scope.innerText || scope.textContent || "");
+    if (lines.length < 2) continue;
+
+    const overview = trimCompanySectionLines(lines, "Overview");
+    if (overview) return overview;
+  }
+
+  return "";
+}
+
+function trimCompanySectionLines(lines, label) {
+  const stopLabels = getCompanyStopLabels();
+  const values = [];
+  let started = false;
+
+  for (const line of lines) {
+    const normalized = normalizeLabel(line);
+    if (!started) {
+      started = normalized === normalizeLabel(label);
+      continue;
+    }
+
+    if (stopLabels.has(normalized) || /^employees at\b/i.test(line)) break;
+    if (!isCompanyChromeLine(line)) values.push(line);
+  }
+
+  return values.join("\n");
 }
 
 function splitCompanySummary(value) {
@@ -994,7 +1045,7 @@ function companyNameFromUrl() {
 
 function companyTaglineFromLines() {
   const name = companyNameFromDocumentTitle();
-  const lines = compactLines(document.body?.innerText || "");
+  const lines = companyTextLines();
   const index = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(name));
 
   if (index >= 0) {
@@ -1005,11 +1056,11 @@ function companyTaglineFromLines() {
 }
 
 function companyOverviewFromLines() {
-  return companySectionAfterLabel("Overview") || companySectionAfterLabel("About us") || companySectionAfterLabel("About");
+  return companyOverviewFromDom() || companySectionAfterLabel("Overview") || companySectionAfterLabel("About us") || companySectionAfterLabel("About");
 }
 
 function companySectionAfterLabel(label) {
-  const lines = compactLines(document.body?.innerText || "");
+  const lines = companyTextLines();
   const start = lines.findIndex((line) => normalizeLabel(line) === normalizeLabel(label));
   if (start < 0) return "";
 
@@ -1033,7 +1084,7 @@ function isCompanyChromeLine(line) {
 function findCompanyWebsite() {
   const visibleWebsite = firstLikelyCompanyWebsite([
     companyDomValueAfterLabel("Website"),
-    companyValueAfterLabel(compactLines(document.body?.innerText || ""), "Website")
+    companyValueAfterLabel(companyTextLines(), "Website")
   ]);
   if (visibleWebsite) return visibleWebsite;
 
