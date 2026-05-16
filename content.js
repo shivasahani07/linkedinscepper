@@ -963,7 +963,11 @@ function findCompanyFactLine(lines, pattern) {
 
 function isReasonableCompanyFactLine(line) {
   const value = compactText(line);
-  return isReasonableCompanyTextLine(value) && value.length <= 240 && !/Activity|Posts|Comments|Images|Profile language|Public profile|People you may know|Who your viewers also viewed/i.test(value);
+  const followerMentions = value.match(/followers/gi)?.length || 0;
+  return isReasonableCompanyTextLine(value)
+    && value.length <= 240
+    && followerMentions <= 1
+    && !/Activity|Posts|Comments|Images|Interests|Top Voices|Groups|Newsletters|Schools|Following|Profile language|Public profile|People you may know|Who your viewers also viewed/i.test(value);
 }
 
 function companyOverviewFromDom() {
@@ -1178,10 +1182,12 @@ function companyWebsiteScore(value) {
     const host = url.hostname.replace(/^www\./i, "").toLowerCase();
     const slug = companySlugFromUrl();
     const name = normalizeWebsiteToken(companyNameFromDocumentTitle() || companyNameFromUrl());
+    const tokens = companyWebsiteTokens();
 
     if (isDisallowedCompanyWebsiteHost(host)) return 0;
     if (slug && host.includes(slug)) return 100;
     if (name && host.includes(name)) return 90;
+    if (tokens.some((token) => host.includes(token))) return 85;
     if (/\.(com|io|ai|dev|app|co|org|net)$/i.test(host)) return 10;
     return 1;
   } catch {
@@ -1195,6 +1201,21 @@ function isDisallowedCompanyWebsiteHost(host) {
 
 function companySlugFromUrl() {
   return normalizeWebsiteToken(location.pathname.match(/^\/(?:company|school)\/([^/]+)/)?.[1] || "");
+}
+
+function companyWebsiteTokens() {
+  const stopWords = new Set(["technologies", "technology", "tech", "pvt", "ltd", "private", "limited", "inc", "llc", "labs", "solutions", "services", "systems", "software", "company", "corp", "corporation"]);
+  const sources = [
+    companyNameFromDocumentTitle(),
+    companyNameFromUrl(),
+    location.pathname.match(/^\/(?:company|school)\/([^/]+)/)?.[1]?.replace(/-/g, " ") || ""
+  ];
+
+  return [...new Set(sources
+    .flatMap((source) => compactText(source).toLowerCase().split(/[^a-z0-9]+/))
+    .map(normalizeWebsiteToken)
+    .filter((token) => token.length >= 4 && !stopWords.has(token)))]
+    .slice(0, 6);
 }
 
 function normalizeWebsiteToken(value) {
